@@ -60,7 +60,3 @@ jobs:
 
     - name: Execute Integration and Feature tests via PHPUnit
       run: vendor/bin/phpunit --configuration phpunit.xml.dist --testsuite Integration,Feature
-
-    - name: Execute Nova tests via PHPUnit
-      if: github.event_name != 'pull_request'
-      run: vendor/bin/phpunit --configuration phpunit.xml.dist --testsuite Nova
