@@ -75,31 +75,19 @@ trait ModelCaching
         //     $instance->checkCooldownAndFlushAfterPersisting($instance);
         // });
 
-        static::pivotSynced(function ($instance, $secondInstance, $relationship) {
-            if(is_array($relationship) && is_string($secondInstance)) {
-                $relationship = $secondInstance;
-            }
+        static::pivotSynced(function ($instance, $relationship) {
             $instance->checkCooldownAndFlushAfterPersisting($instance, $relationship);
         });
 
-        static::pivotAttached(function ($instance, $secondInstance, $relationship) {
-            if(is_array($relationship) && is_string($secondInstance)) {
-                $relationship = $secondInstance;
-            }
+        static::pivotAttached(function ($instance, $relationship) {
             $instance->checkCooldownAndFlushAfterPersisting($instance, $relationship);
         });
 
-        static::pivotDetached(function ($instance, $secondInstance, $relationship) {
-            if(is_array($relationship) && is_string($secondInstance)) {
-                $relationship = $secondInstance;
-            }
+        static::pivotDetached(function ($instance, $relationship) {
             $instance->checkCooldownAndFlushAfterPersisting($instance, $relationship);
         });
 
-        static::pivotUpdated(function ($instance, $secondInstance, $relationship) {
-            if(is_array($relationship) && is_string($secondInstance)) {
-                $relationship = $secondInstance;
-            }
+        static::pivotUpdated(function ($instance, $relationship) {
             $instance->checkCooldownAndFlushAfterPersisting($instance, $relationship);
         });
     }

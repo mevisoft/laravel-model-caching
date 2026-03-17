@@ -36,8 +36,14 @@ trait CreatesApplication
         $baselinePath = "{$databasePath}/baseline.sqlite";
         $testingPath = "{$databasePath}/testing.sqlite";
 
-        ! file_exists($testingPath)
-            ?: unlink($testingPath);
+        if(file_exists($testingPath)){
+            try {
+                unlink($testingPath);
+            }catch (\Exception $ex){
+                file_put_contents($testingPath,"");
+            }
+        }
+
         copy($baselinePath, $testingPath);
 
         require(__DIR__ . '/routes/web.php');
@@ -79,8 +85,14 @@ trait CreatesApplication
             "foreign_key_constraints" => false,
         ]);
 
-        ! file_exists($file)
-            ?: unlink($file);
+        if(file_exists($file)){
+            try {
+                unlink($file);
+            }catch (\Exception $ex){
+                file_put_contents($file,"");
+            }
+        }
+
         touch($file);
 
         $this->withFactories(__DIR__ . '/database/factories');
@@ -137,5 +149,28 @@ trait CreatesApplication
             ],
             'pagination' => 'simple',
         ]);
+    }
+
+    public function appVersionEightAndNine(): bool
+    {
+        return version_compare(app()->version(), '8.0.0', '>=')
+            && version_compare(app()->version(), '10.0.0', '<');
+    }
+
+    public function appVersionFiveBetweenSeven(): bool
+    {
+        return version_compare(app()->version(), '5.6.0', '>=')
+            && version_compare(app()->version(), '8.0.0', '<');
+    }
+
+    public function appVersionOld(): bool
+    {
+        return version_compare(app()->version(), '5.4.0', '>=')
+            && version_compare(app()->version(), '5.6.0', '<');
+    }
+
+    public function appVersionTen(): bool
+    {
+        return version_compare(app()->version(), '10.0.0', '>=');
     }
 }
