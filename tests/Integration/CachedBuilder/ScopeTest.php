@@ -1,6 +1,7 @@
 <?php namespace GeneaLabs\LaravelModelCaching\Tests\Integration\CachedBuilder;
 
 use GeneaLabs\LaravelModelCaching\Tests\Fixtures\Author;
+use GeneaLabs\LaravelModelCaching\Tests\Fixtures\Book;
 use GeneaLabs\LaravelModelCaching\Tests\Fixtures\UncachedAuthor;
 use GeneaLabs\LaravelModelCaching\Tests\IntegrationTestCase;
 use GeneaLabs\LaravelModelCaching\Tests\Fixtures\AuthorBeginsWithScoped;
@@ -15,14 +16,17 @@ class ScopeTest extends IntegrationTestCase
 {
     public function testScopeClauseParsing()
     {
-        $author = factory(Author::class, 1)
+        $author = Author::factory()->count(1)
             ->create(['name' => 'Anton'])
             ->first();
         $authors = (new Author)
             ->startsWithA()
             ->get();
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors:genealabslaravelmodelcachingtestsfixturesauthor-name_like_A%-authors.deleted_at_null");
-        $tags = ["genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthor"];
+        $tags = [
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthor",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors",
+        ];
 
         $cachedResults = $this->cache()
             ->tags($tags)
@@ -38,14 +42,17 @@ class ScopeTest extends IntegrationTestCase
 
     public function testScopeClauseWithParameter()
     {
-        $author = factory(Author::class, 1)
+        $author = Author::factory()->count(1)
             ->create(['name' => 'Boris'])
             ->first();
         $authors = (new Author)
             ->nameStartsWith("B")
             ->get();
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors:genealabslaravelmodelcachingtestsfixturesauthor-name_like_B%-authors.deleted_at_null");
-        $tags = ["genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthor"];
+        $tags = [
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthor",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors",
+        ];
 
         $cachedResults = $this->cache()
             ->tags($tags)
@@ -61,15 +68,18 @@ class ScopeTest extends IntegrationTestCase
 
     public function testGlobalScopesAreCached()
     {
-        $user = factory(User::class)->create(["name" => "Abernathy Kings"]);
+        $user = User::factory()->create(["name" => "Abernathy Kings"]);
         $this->actingAs($user);
-        $author = factory(UncachedAuthor::class, 1)
+        $author = UncachedAuthor::factory()->count(1)
             ->create(['name' => 'Alois'])
             ->first();
         $authors = (new AuthorBeginsWithScoped)
             ->get();
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors:genealabslaravelmodelcachingtestsfixturesauthorbeginswithscoped-name_like_A%0=A%25");
-        $tags = ["genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthorbeginswithscoped"];
+        $tags = [
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthorbeginswithscoped",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors",
+        ];
 
         $cachedResults = $this->cache()
             ->tags($tags)
@@ -85,13 +95,16 @@ class ScopeTest extends IntegrationTestCase
 
     public function testInlineGlobalScopesAreCached()
     {
-        $author = factory(UncachedAuthor::class, 1)
+        $author = UncachedAuthor::factory()->count(1)
             ->create(['name' => 'Alois'])
             ->first();
         $authors = (new AuthorWithInlineGlobalScope)
             ->get();
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors:genealabslaravelmodelcachingtestsfixturesauthorwithinlineglobalscope-authors.deleted_at_null-name_like_A%0=A%25");
-        $tags = ["genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthorwithinlineglobalscope"];
+        $tags = [
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthorwithinlineglobalscope",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors",
+        ];
 
         $cachedResults = $this->cache()
             ->tags($tags)
@@ -106,8 +119,8 @@ class ScopeTest extends IntegrationTestCase
 
     public function testGlobalScopesWhenSwitchingContextUsingAllMethod()
     {
-        factory(Author::class, 200)->create();
-        $user = factory(User::class)->create(["name" => "Andrew Junior"]);
+        Author::factory()->count(200)->create();
+        $user = User::factory()->create(["name" => "Andrew Junior"]);
         $this->actingAs($user);
         $authorsA = (new AuthorBeginsWithScoped)
             ->all()
@@ -115,7 +128,7 @@ class ScopeTest extends IntegrationTestCase
                 return (new Str)->substr($author->name, 0, 1);
             })
             ->unique();
-        $user = factory(User::class)->create(["name" => "Barry Barry Barry"]);
+        $user = User::factory()->create(["name" => "Barry Barry Barry"]);
         $this->actingAs($user);
         $authorsB = (new AuthorBeginsWithScoped)
             ->all()
@@ -132,8 +145,8 @@ class ScopeTest extends IntegrationTestCase
 
     public function testGlobalScopesWhenSwitchingContextUsingGetMethod()
     {
-        factory(Author::class, 200)->create();
-        $user = factory(User::class)->create(["name" => "Anton Junior"]);
+        Author::factory()->count(200)->create();
+        $user = User::factory()->create(["name" => "Anton Junior"]);
         $this->actingAs($user);
         $authorsA = (new AuthorBeginsWithScoped)
             ->get()
@@ -141,7 +154,7 @@ class ScopeTest extends IntegrationTestCase
                 return (new Str)->substr($author->name, 0, 1);
             })
             ->unique();
-        $user = factory(User::class)->create(["name" => "Burli Burli Burli"]);
+        $user = User::factory()->create(["name" => "Burli Burli Burli"]);
         $this->actingAs($user);
         $authorsB = (new AuthorBeginsWithScoped)
             ->get()
@@ -158,16 +171,19 @@ class ScopeTest extends IntegrationTestCase
 
     public function testGlobalScopesAreNotCachedWhenUsingWithoutGlobalScopes()
     {
-        $user = factory(User::class)->create(["name" => "Abernathy Kings"]);
+        $user = User::factory()->create(["name" => "Abernathy Kings"]);
         $this->actingAs($user);
-        $author = factory(UncachedAuthor::class, 1)
+        $author = UncachedAuthor::factory()->count(1)
             ->create(['name' => 'Alois'])
             ->first();
         $authors = (new AuthorBeginsWithScoped)
             ->withoutGlobalScopes()
             ->get();
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors:genealabslaravelmodelcachingtestsfixturesauthorbeginswithscoped");
-        $tags = ["genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthorbeginswithscoped"];
+        $tags = [
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthorbeginswithscoped",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors",
+        ];
 
         $cachedResults = $this->cache()
             ->tags($tags)
@@ -183,8 +199,8 @@ class ScopeTest extends IntegrationTestCase
 
     public function testWithoutGlobalScopes()
     {
-        factory(Author::class, 200)->create();
-        $user = factory(User::class)->create(["name" => "Andrew Junior"]);
+        Author::factory()->count(200)->create();
+        $user = User::factory()->create(["name" => "Andrew Junior"]);
         $this->actingAs($user);
         $authorsA = (new AuthorBeginsWithScoped)
             ->withoutGlobalScopes()
@@ -193,7 +209,7 @@ class ScopeTest extends IntegrationTestCase
                 return (new Str)->substr($author->name, 0, 1);
             })
             ->unique();
-        $user = factory(User::class)->create(["name" => "Barry Barry Barry"]);
+        $user = User::factory()->create(["name" => "Barry Barry Barry"]);
         $this->actingAs($user);
         $authorsB = (new AuthorBeginsWithScoped)
             ->withoutGlobalScopes(['GeneaLabs\LaravelModelCaching\Tests\Fixtures\Scopes\NameBeginsWith'])
@@ -209,8 +225,8 @@ class ScopeTest extends IntegrationTestCase
 
     public function testWithoutGlobalScope()
     {
-        factory(Author::class, 200)->create();
-        $user = factory(User::class)->create(["name" => "Andrew Junior"]);
+        Author::factory()->count(200)->create();
+        $user = User::factory()->create(["name" => "Andrew Junior"]);
         $this->actingAs($user);
         $authorsA = (new AuthorBeginsWithScoped)
             ->withoutGlobalScope('GeneaLabs\LaravelModelCaching\Tests\Fixtures\Scopes\NameBeginsWith')
@@ -219,7 +235,7 @@ class ScopeTest extends IntegrationTestCase
                 return (new Str)->substr($author->name, 0, 1);
             })
             ->unique();
-        $user = factory(User::class)->create(["name" => "Barry Barry Barry"]);
+        $user = User::factory()->create(["name" => "Barry Barry Barry"]);
         $this->actingAs($user);
         $authorsB = (new AuthorBeginsWithScoped)
             ->withoutGlobalScope('GeneaLabs\LaravelModelCaching\Tests\Fixtures\Scopes\NameBeginsWith')
@@ -235,6 +251,10 @@ class ScopeTest extends IntegrationTestCase
 
     public function testLocalScopesInRelationship()
     {
+        $author = Author::factory()->create();
+        Book::factory()->create(['author_id' => $author->id, 'title' => 'Alpha Book']);
+        Book::factory()->create(['author_id' => $author->id, 'title' => 'Beta Book']);
+
         $first = "A";
         $second = "B";
         $authors1 = (new Author)
@@ -243,23 +263,26 @@ class ScopeTest extends IntegrationTestCase
             }])
             ->get();
         $authors2 = (new Author)
-            ->disableModelCaching()
             ->with(['books' => static function (HasMany $model) use ($second) {
                 $model->startsWith($second);
             }])
             ->get();
 
-        // $this->assertNotEquals($authors1, $authors2);
-        $this->markTestSkipped();
+        $booksFromAuthors1 = $authors1->find($author->id)->books;
+        $booksFromAuthors2 = $authors2->find($author->id)->books;
+
+        $this->assertCount(1, $booksFromAuthors1);
+        $this->assertCount(1, $booksFromAuthors2);
+        $this->assertEquals('Alpha Book', $booksFromAuthors1->first()->title);
+        $this->assertEquals('Beta Book', $booksFromAuthors2->first()->title);
     }
 
     public function testScopeNotAppliedTwice()
     {
-        $user = factory(User::class)
-            ->create(["name" => "Anton Junior"]);
+        $user = User::factory()->create(["name" => "Anton Junior"]);
         $this->actingAs($user);
         DB::enableQueryLog();
-        
+
         (new AuthorBeginsWithScoped)
             ->get();
         $queryLog = DB::getQueryLog();

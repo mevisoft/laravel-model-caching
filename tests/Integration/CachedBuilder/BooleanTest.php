@@ -13,6 +13,7 @@ class BooleanTest extends IntegrationTestCase
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors:genealabslaravelmodelcachingtestsfixturesauthor-is_famous_=_1-authors.deleted_at_null");
         $tags = [
             "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthor",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors",
         ];
 
         $authors = (new Author)
@@ -37,6 +38,7 @@ class BooleanTest extends IntegrationTestCase
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors:genealabslaravelmodelcachingtestsfixturesauthor-is_famous_=_-authors.deleted_at_null");
         $tags = [
             "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesauthor",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:authors",
         ];
 
         $authors = (new Author)
@@ -61,10 +63,11 @@ class BooleanTest extends IntegrationTestCase
         $key = sha1("genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:books:genealabslaravelmodelcachingtestsfixturesbook-exists-and_books.author_id_=_authors.id-is_famous_=_-authors.deleted_at_null-_and_title_=_Mixed_Clause");
         $tags = [
             "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:genealabslaravelmodelcachingtestsfixturesbook",
+            "genealabs:laravel-model-caching:testing:{$this->testingSqlitePath}testing.sqlite:books",
         ];
 
-        $expectedAuthor = factory(Author::class)->create(['is_famous' => false]);
-        factory(Book::class)->create(['author_id' => $expectedAuthor->getKey(), 'title' => 'Mixed Clause']);
+        $expectedAuthor = Author::factory()->create(['is_famous' => false]);
+        Book::factory()->create(['author_id' => $expectedAuthor->getKey(), 'title' => 'Mixed Clause']);
 
         $books = (new Book)
             ->whereHas('author', function ($query) {

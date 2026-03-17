@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace GeneaLabs\LaravelModelCaching\Traits;
 
 use Closure;
@@ -8,13 +10,24 @@ use GeneaLabs\LaravelModelCaching\CacheKey;
 use GeneaLabs\LaravelModelCaching\CacheTags;
 use Illuminate\Cache\TaggableStore;
 use Illuminate\Container\Container;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use ReflectionClass;
+use ReflectionNamedType;
+use ReflectionMethod;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 trait Caching
 {
+    protected static array $cacheConnectionExceptions = [
+        \RedisException::class,
+        'Predis\\Connection\\ConnectionException',
+    ];
+
     protected $isCachable = true;
     protected $scopesAreApplied = false;
     protected $macroKey = "";
@@ -23,6 +36,30 @@ trait Caching
 
     public function __call($method, $parameters)
     {
+        // Inner builder takes precedence over parent::__call when present.
+        // This means if both the inner builder and a scope define the same
+        // method name, the inner builder wins. This is intentional: custom
+        // builder methods should not be silently overridden by scopes.
+        if (
+            property_exists($this, 'innerBuilder')
+            && $this->innerBuilder
+            && method_exists($this->innerBuilder, $method)
+        ) {
+            // Track the method call in macroKey for cache key differentiation,
+            // matching the same treatment applied to local/global macros below.
+            $this->macroKey .= "-{$method}";
+
+            if ($parameters) {
+                $this->macroKey .= implode("_", $parameters);
+            }
+
+            $result = $this->innerBuilder->{$method}(...$parameters);
+
+            return $result === $this->innerBuilder
+                ? $this
+                : $result;
+        }
+
         $result = parent::__call($method, $parameters);
 
         if (
@@ -111,24 +148,26 @@ trait Caching
 
     public function flushCache(array $tags = [])
     {
-        if (count($tags) === 0) {
-            $tags = $this->makeCacheTags();
-        }
+        $this->withCacheFallback(function () use ($tags) {
+            if (count($tags) === 0) {
+                $tags = $this->makeCacheTags();
+            }
 
-        $this->cache($tags)->flush();
+            $this->cache($tags)->flush();
 
-        [$cacheCooldown] = $this->getModelCacheCooldown($this);
+            [$cacheCooldown] = $this->getModelCacheCooldown($this);
 
-        if ($cacheCooldown) {
-            $cachePrefix = $this->getCachePrefix();
-            $modelClassName = get_class($this);
-            $cacheKey = "{$cachePrefix}:{$modelClassName}-cooldown:saved-at";
+            if ($cacheCooldown) {
+                $cachePrefix = $this->getCachePrefix();
+                $modelClassName = get_class($this);
+                $cacheKey = "{$cachePrefix}:{$modelClassName}-cooldown:saved-at";
 
-            $this->cache()
-                ->rememberForever($cacheKey, function () {
-                    return (new Carbon)->now();
-                });
-        }
+                $this->cache()
+                    ->rememberForever($cacheKey, function () {
+                        return (new Carbon)->now();
+                    });
+            }
+        }, 'cache flush failed');
     }
 
     protected function getCachePrefix() : string
@@ -158,7 +197,8 @@ trait Caching
         string $keyDifferentiator = ''
     ) : string {
         $this->applyScopesToInstance();
-        $eagerLoad = $this->eagerLoad ?? [];
+        $eagerLoad = $this->eagerLoad
+            ?? [];
         $model = $this;
 
         if (property_exists($this, "model")) {
@@ -202,7 +242,7 @@ trait Caching
         return $tags;
     }
 
-    public function getModelCacheCooldown(Model $instance) : array
+    protected function getModelCacheCooldown(Model $instance) : array
     {
         if (! $instance->cacheCooldownSeconds) {
             return [null, null, null];
@@ -240,28 +280,30 @@ trait Caching
 
     protected function checkCooldownAndRemoveIfExpired(Model $instance)
     {
-        [$cacheCooldown, $invalidatedAt] = $this->getModelCacheCooldown($instance);
+        $this->withCacheFallback(function () use ($instance) {
+            [$cacheCooldown, $invalidatedAt] = $this->getModelCacheCooldown($instance);
 
-        if (
-            ! $cacheCooldown
-            || (new Carbon)->now()->diffInSeconds($invalidatedAt, true) < $cacheCooldown
-        ) {
-            return;
-        }
+            if (
+                ! $cacheCooldown
+                || (new Carbon)->now()->diffInSeconds($invalidatedAt, true) < $cacheCooldown
+            ) {
+                return;
+            }
 
-        $cachePrefix = $this->getCachePrefix();
-        $modelClassName = get_class($instance);
+            $cachePrefix = $this->getCachePrefix();
+            $modelClassName = get_class($instance);
 
-        $instance
-            ->cache()
-            ->forget("{$cachePrefix}:{$modelClassName}-cooldown:seconds");
-        $instance
-            ->cache()
-            ->forget("{$cachePrefix}:{$modelClassName}-cooldown:invalidated-at");
-        $instance
-            ->cache()
-            ->forget("{$cachePrefix}:{$modelClassName}-cooldown:saved-at");
-        $instance->flushCache();
+            $instance
+                ->cache()
+                ->forget("{$cachePrefix}:{$modelClassName}-cooldown:seconds");
+            $instance
+                ->cache()
+                ->forget("{$cachePrefix}:{$modelClassName}-cooldown:invalidated-at");
+            $instance
+                ->cache()
+                ->forget("{$cachePrefix}:{$modelClassName}-cooldown:saved-at");
+            $instance->flushCache();
+        }, 'cache cooldown check failed');
     }
 
     protected function checkCooldownAndFlushAfterPersisting(Model $instance, string $relationship = "")
@@ -270,30 +312,100 @@ trait Caching
             return;
         }
 
-        [$cacheCooldown, $invalidatedAt] = $instance->getModelCacheCooldown($instance);
+        $this->withCacheFallback(function () use ($instance, $relationship) {
+            [$cacheCooldown, $invalidatedAt] = $this->getModelCacheCooldown($instance);
 
-        if (! $cacheCooldown) {
-            $instance->flushCache();
+            if (! $cacheCooldown) {
+                $instance->flushCache();
+                $this->flushMorphToRelatedCaches($instance);
+                $this->flushRelationshipCache($instance, $relationship);
 
-            if ($relationship) {
-                $relationshipInstance = $instance->$relationship()->getModel();
-
-                if (method_exists($relationshipInstance, "flushCache")) {
-                    $relationshipInstance->flushCache();
-                }
+                return;
             }
 
+            $this->setCacheCooldownSavedAtTimestamp($instance);
+
+            if ((new Carbon)->now()->diffInSeconds($invalidatedAt, true) >= $cacheCooldown) {
+                $instance->flushCache();
+                $this->flushMorphToRelatedCaches($instance);
+                $this->flushRelationshipCache($instance, $relationship);
+            }
+        }, 'cache flush after persisting failed');
+    }
+
+    protected static $morphToMethodCache = [];
+
+    protected function flushMorphToRelatedCaches(Model $instance): void
+    {
+        $className = get_class($instance);
+
+        if (! isset(static::$morphToMethodCache[$className])) {
+            static::$morphToMethodCache[$className] = [];
+            $reflection = new ReflectionClass($instance);
+
+            foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                if ($method->class !== $className
+                    || $method->getNumberOfParameters() > 0
+                ) {
+                    continue;
+                }
+
+                $returnType = $method->getReturnType();
+
+                if (! $returnType
+                    || ! $returnType instanceof ReflectionNamedType
+                    || $returnType->getName() !== MorphTo::class
+                ) {
+                    continue;
+                }
+
+                static::$morphToMethodCache[$className][] = $method->getName();
+            }
+        }
+
+        foreach (static::$morphToMethodCache[$className] as $morphToName) {
+            $relation = $instance->{$morphToName}();
+            $typeColumn = $relation->getMorphType();
+            $idColumn = $relation->getForeignKeyName();
+            $parentType = $instance->getAttribute($typeColumn);
+            $parentId = $instance->getAttribute($idColumn);
+
+            if (! $parentType || ! $parentId) {
+                continue;
+            }
+
+            $parentClass = Relation::getMorphedModel($parentType) ?? $parentType;
+            $parentModel = new $parentClass;
+
+            if (method_exists($parentModel, 'flushCache')) {
+                $parentModel->flushCache();
+            }
+        }
+    }
+
+    protected function flushRelationshipCache(Model $instance, string $relationship = ""): void
+    {
+        if (! $relationship) {
             return;
         }
 
-        $this->setCacheCooldownSavedAtTimestamp($instance);
+        $relationObject = $instance->$relationship();
+        $relationshipInstance = $relationObject->getModel();
 
-        if ((new Carbon)->now()->diffInSeconds($invalidatedAt, true) >= $cacheCooldown) {
-            $instance->flushCache();
+        if (method_exists($relationshipInstance, "flushCache")) {
+            $relationshipInstance->flushCache();
+        } else {
+            // Related model is not cacheable — build the cache tag for the
+            // related model and flush it so stale relationship results are
+            // cleared. This covers BelongsToMany with custom pivot models
+            // where only the parent model uses the Cachable trait.
+            $tags = (new CacheTags(
+                [],
+                $relationshipInstance,
+                Container::getInstance()->make("db")->query()
+            ))->make();
 
-            if ($relationship) {
-                $instance->$relationship()->getModel()->flushCache();
-            }
+            $instance->cache($tags)->flush();
         }
     }
 
@@ -338,19 +450,77 @@ trait Caching
                 ?? true;
         }
 
+        $hasLock = false;
+
+        if (property_exists($this, 'query') && $this->query) {
+            $baseQuery = $this->query;
+
+            if ($baseQuery instanceof \Illuminate\Database\Eloquent\Builder) {
+                $baseQuery = $baseQuery->getQuery();
+            }
+
+            $hasLock = $baseQuery->lock !== null;
+        }
+
         return $this->isCachable
-            && $allRelationshipsAreCachable;
+            && $allRelationshipsAreCachable
+            && ! $hasLock;
+    }
+
+    public function shouldFallbackToDatabase() : bool
+    {
+        return Container::getInstance()
+            ->make("config")
+            ->get("laravel-model-caching.fallback-to-database", false);
+    }
+
+    public function isCacheConnectionException(\Throwable $exception) : bool
+    {
+        foreach (static::$cacheConnectionExceptions as $exceptionClass) {
+            if ($exception instanceof $exceptionClass) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function withCacheFallback(callable $operation, string $context, ?callable $fallback = null)
+    {
+        static $inFallback = false;
+
+        try {
+            return $operation();
+        } catch (\Throwable $exception) {
+            if (! $this->shouldFallbackToDatabase() || ! $this->isCacheConnectionException($exception)) {
+                throw $exception;
+            }
+
+            if (! $inFallback) {
+                Log::warning("laravel-model-caching: {$context} — {$exception->getMessage()}");
+            }
+
+            $inFallback = true;
+
+            try {
+                return $fallback ? $fallback() : null;
+            } finally {
+                $inFallback = false;
+            }
+        }
     }
 
     protected function setCacheCooldownSavedAtTimestamp(Model $instance)
     {
-        $cachePrefix = $this->getCachePrefix();
-        $modelClassName = get_class($instance);
-        $cacheKey = "{$cachePrefix}:{$modelClassName}-cooldown:saved-at";
+        $this->withCacheFallback(function () use ($instance) {
+            $cachePrefix = $this->getCachePrefix();
+            $modelClassName = get_class($instance);
+            $cacheKey = "{$cachePrefix}:{$modelClassName}-cooldown:saved-at";
 
-        $instance->cache()
-            ->rememberForever($cacheKey, function () {
-                return (new Carbon)->now();
-            });
+            $instance->cache()
+                ->rememberForever($cacheKey, function () {
+                    return (new Carbon)->now();
+                });
+        }, 'cache cooldown timestamp write failed');
     }
 }

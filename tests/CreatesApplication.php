@@ -1,11 +1,7 @@
 <?php namespace GeneaLabs\LaravelModelCaching\Tests;
 
 use GeneaLabs\LaravelModelCaching\Providers\Service as LaravelModelCachingService;
-use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Support\Facades\Artisan;
-use Laravel\Nova\Http\Middleware\Authorize;
-use Laravel\Nova\Http\Middleware\BootTools;
-use Laravel\Nova\Http\Middleware\DispatchServingNovaEvent;
 
 trait CreatesApplication
 {
@@ -47,8 +43,6 @@ trait CreatesApplication
         copy($baselinePath, $testingPath);
 
         require(__DIR__ . '/routes/web.php');
-
-        $this->withFactories(__DIR__ . '/database/factories');
 
         view()->addLocation(__DIR__ . '/resources/views', 'laravel-model-caching');
 
@@ -95,7 +89,6 @@ trait CreatesApplication
 
         touch($file);
 
-        $this->withFactories(__DIR__ . '/database/factories');
         $this->loadMigrationsFrom(__DIR__ . '/database/migrations');
 
         Artisan::call('db:seed', [
@@ -135,20 +128,6 @@ trait CreatesApplication
             'connection' => 'model-cache',
         ]);
         $app['config']->set('laravel-model-caching.store', 'model');
-        $app['config']->set("nova", [
-            'name' => 'Nova Site',
-            'url' => env('APP_URL', '/'),
-            'path' => '/nova',
-            'guard' => env('NOVA_GUARD', null),
-            'middleware' => [
-                'web',
-                Authenticate::class,
-                DispatchServingNovaEvent::class,
-                BootTools::class,
-                Authorize::class,
-            ],
-            'pagination' => 'simple',
-        ]);
     }
 
     public function appVersionEightAndNine(): bool
@@ -177,6 +156,12 @@ trait CreatesApplication
 
     public function appVersionEleven(): bool
     {
-        return version_compare(app()->version(), '11.0.0', '>=');
+        return version_compare(app()->version(), '11.0.0', '>=')
+            && version_compare(app()->version(), '12.0.0', '<');
+    }
+
+    public function appVersionTwelve(): bool
+    {
+        return version_compare(app()->version(), '12.0.0', '>=');
     }
 }
