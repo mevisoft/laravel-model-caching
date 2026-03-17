@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace GeneaLabs\LaravelModelCaching;
 
 use BackedEnum;
+use DateTimeInterface;
 use Exception;
 use GeneaLabs\LaravelModelCaching\Traits\CachePrefixing;
 use Illuminate\Database\Query\Expression;
@@ -10,6 +13,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Ramsey\Uuid\Uuid;
+use Throwable;
 use UnitEnum;
 
 class CacheKey
@@ -136,11 +140,6 @@ class CacheKey
 
         $type = strtolower($where["type"]);
         $subquery = $this->getValuesFromWhere($where);
-        $values = collect($this->getCurrentBinding('where', []));
-
-        if (Str::startsWith($subquery, $values->first())) {
-            $this->currentBinding += count($where["values"]);
-        }
 
         if (! is_numeric($subquery) && ! is_numeric(str_replace("_", "", $subquery))) {
             try {
@@ -153,7 +152,25 @@ class CacheKey
             }
         }
 
+        $placeholderCount = preg_match_all('/\?(?=(?:[^"]*"[^"]*")*[^"]*\Z)/m', $subquery);
+
+        if ($placeholderCount === 0) {
+            if (data_get($where, "values")) {
+                $this->currentBinding += count(data_get($where, "values"));
+            }
+
+            $values = $this->recursiveImplode([$subquery], "_");
+
+            return "-{$where["column"]}_{$type}{$values}";
+        }
+
+        $values = collect(data_get($this->query->bindings, "where"))
+            ->slice($this->currentBinding, $placeholderCount)
+            ->values();
+        $this->currentBinding += $placeholderCount;
+
         $subquery = preg_replace('/\?(?=(?:[^"]*"[^"]*")*[^"]*\Z)/m', "_??_", $subquery);
+        $subquery = str_replace('%', '%%', $subquery);
         $subquery = collect(vsprintf(str_replace("_??_", "%s", $subquery), $values->toArray()));
         $values = $this->recursiveImplode($subquery->toArray(), "_");
 
@@ -235,7 +252,7 @@ class CacheKey
 
 	if (data_get($where, "column") instanceof Expression) {
             $where["column"] = $this->expressionToString(data_get($where, "column"));
-        }    
+        }
 
         $column .= isset($where["column"]) ? $where["column"] : "";
         $column .= isset($where["columns"]) ? implode("-", $where["columns"]) : "";
@@ -262,6 +279,10 @@ class CacheKey
 
             return "_" . implode("_", $columns);
         }
+
+        $columns = array_map(function ($column) {
+            return $this->expressionToString($column);
+        }, $columns);
 
         return "_" . implode("_", $columns);
     }
@@ -364,7 +385,7 @@ class CacheKey
             $values = $values->format("Y-m-d-H-i-s");
         }
 
-        return $values;
+        return (string) $values;
     }
 
     protected function getWhereClauses(array $wheres = []) : string
@@ -403,17 +424,52 @@ class CacheKey
             return "";
         }
 
-        return $eagerLoads->keys()->reduce(function ($carry, $related) {
+        return $eagerLoads->reduce(function ($carry, $constraint, $related) {
             if (! method_exists($this->model, $related)) {
-                return "{$carry}-{$related}";
+                $carry .= "-{$related}";
+            } else {
+                $relatedModel = $this->model->$related()->getRelated();
+                $relatedConnection = $relatedModel->getConnection()->getName();
+                $relatedDatabase = $relatedModel->getConnection()->getDatabaseName();
+
+                $carry .= "-{$relatedConnection}:{$relatedDatabase}:{$related}";
             }
 
-            $relatedModel = $this->model->$related()->getRelated();
-            $relatedConnection = $relatedModel->getConnection()->getName();
-            $relatedDatabase = $relatedModel->getConnection()->getDatabaseName();
+            $carry .= $this->getEagerLoadConstraintKey($related, $constraint);
 
-            return "{$carry}-{$relatedConnection}:{$relatedDatabase}:{$related}";
-        });
+            return $carry;
+        }, "");
+    }
+
+    protected function getEagerLoadConstraintKey(string $related, $constraint) : string
+    {
+        if (! ($constraint instanceof \Closure)) {
+            return "";
+        }
+
+        if (! method_exists($this->model, $related)) {
+            return "";
+        }
+
+        try {
+            $freshModel = (new \ReflectionClass($this->model))->newInstanceWithoutConstructor();
+            $relation = $freshModel->$related();
+            $baseWheres   = $relation->getQuery()->getQuery()->wheres ?? [];
+            $baseBindings = $relation->getQuery()->getQuery()->bindings['where'] ?? [];
+            $constraint($relation);
+            $afterWheres   = $relation->getQuery()->getQuery()->wheres ?? [];
+            $afterBindings = $relation->getQuery()->getQuery()->bindings['where'] ?? [];
+            $addedWheres   = array_slice($afterWheres,   count($baseWheres));
+            $addedBindings = array_slice($afterBindings, count($baseBindings));
+
+            if (empty($addedWheres)) {
+                return "";
+            }
+
+            return "=" . sha1(json_encode($addedWheres) . json_encode($addedBindings));
+        } catch (Throwable) {
+            return "";
+        }
     }
 
     protected function recursiveImplode(array $items, string $glue = ",") : string
@@ -442,17 +498,20 @@ class CacheKey
         return $result;
     }
 
-    private function processEnum(BackedEnum|UnitEnum|Expression|string|null $value): ?string
-    {
+    private function processEnum(
+        BackedEnum|UnitEnum|Expression|DateTimeInterface|int|float|bool|string|null $value,
+    ): string {
         if ($value instanceof BackedEnum) {
             return $value->value;
         } elseif ($value instanceof UnitEnum) {
             return $value->name;
         } elseif ($value instanceof Expression) {
             return $this->expressionToString($value);
+        } elseif ($value instanceof DateTimeInterface) {
+            return $value->format("Y-m-d-H-i-s");
         }
 
-        return $value;
+        return "{$value}";
     }
 
     private function processEnums(array $values): array

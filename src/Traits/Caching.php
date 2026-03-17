@@ -25,7 +25,10 @@ trait Caching
     {
         $result = parent::__call($method, $parameters);
 
-        if (isset($this->localMacros[$method])) {
+        if (
+            isset($this->localMacros[$method])
+            || (method_exists(static::class, 'hasGlobalMacro') && static::hasGlobalMacro($method))
+        ) {
             $this->macroKey .= "-{$method}";
 
             if ($parameters) {
@@ -241,7 +244,7 @@ trait Caching
 
         if (
             ! $cacheCooldown
-            || (new Carbon)->now()->diffInSeconds($invalidatedAt) < $cacheCooldown
+            || (new Carbon)->now()->diffInSeconds($invalidatedAt, true) < $cacheCooldown
         ) {
             return;
         }
@@ -285,7 +288,7 @@ trait Caching
 
         $this->setCacheCooldownSavedAtTimestamp($instance);
 
-        if ((new Carbon)->now()->diffInSeconds($invalidatedAt) >= $cacheCooldown) {
+        if ((new Carbon)->now()->diffInSeconds($invalidatedAt, true) >= $cacheCooldown) {
             $instance->flushCache();
 
             if ($relationship) {
