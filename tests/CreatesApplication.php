@@ -37,7 +37,7 @@ trait CreatesApplication
         $testingPath = "{$databasePath}/testing.sqlite";
 
         ! file_exists($testingPath)
-            ?: file_put_contents($testingPath,"");
+            ?: unlink($testingPath);
         copy($baselinePath, $testingPath);
 
         require(__DIR__ . '/routes/web.php');
@@ -80,7 +80,7 @@ trait CreatesApplication
         ]);
 
         ! file_exists($file)
-            ?: file_put_contents($file,"");
+            ?: unlink($file);
         touch($file);
 
         $this->withFactories(__DIR__ . '/database/factories');
