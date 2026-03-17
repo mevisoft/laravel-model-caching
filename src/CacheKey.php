@@ -16,17 +16,23 @@ class CacheKey
     protected $macroKey;
     protected $model;
     protected $query;
+    protected $withoutGlobalScopes = [];
+    protected $withoutAllGlobalScopes = false;
 
     public function __construct(
         array $eagerLoad,
         $model,
         $query,
-        $macroKey
+        $macroKey,
+        array $withoutGlobalScopes,
+        $withoutAllGlobalScopes
     ) {
         $this->eagerLoad = $eagerLoad;
         $this->macroKey = $macroKey;
         $this->model = $model;
         $this->query = $query;
+        $this->withoutGlobalScopes = $withoutGlobalScopes;
+        $this->withoutAllGlobalScopes = $withoutAllGlobalScopes;
     }
 
     public function make(
@@ -55,6 +61,14 @@ class CacheKey
     {
         if (! method_exists($this->model, 'query')) {
             return '';
+        }
+
+        if ($this->withoutAllGlobalScopes) {
+            return Arr::query($this->model->query()->withoutGlobalScopes()->getBindings());
+        }
+
+        if (count($this->withoutGlobalScopes) > 0) {
+            return Arr::query($this->model->query()->withoutGlobalScopes($this->withoutGlobalScopes)->getBindings());
         }
 
         return Arr::query($this->model->query()->getBindings());
@@ -177,7 +191,11 @@ class CacheKey
         $value = $this->getTypeClause($where);
         $value .= $this->getValuesClause($where);
 
-        return "-{$where["column"]}_{$value}";
+        $column = "";
+        $column .= isset($where["column"]) ? $where["column"] : "";
+        $column .= isset($where["columns"]) ? implode("-", $where["columns"]) : "";
+
+        return "-{$column}_{$value}";
     }
 
     protected function getQueryColumns(array $columns) : string
@@ -231,7 +249,7 @@ class CacheKey
 
     protected function getTypeClause($where) : string
     {
-        $type = in_array($where["type"], ["InRaw", "In", "NotIn", "Null", "NotNull", "between", "NotInSub", "InSub", "JsonContains"])
+        $type = in_array($where["type"], ["InRaw", "In", "NotIn", "Null", "NotNull", "between", "NotInSub", "InSub", "JsonContains", "Fulltext"])
             ? strtolower($where["type"])
             : strtolower($where["operator"]);
 
@@ -262,14 +280,18 @@ class CacheKey
         }
 
         if (is_array((new Arr)->get($where, "values"))) {
-            return implode("_", collect($where["values"])->flatten()->toArray());
+            $values = collect($where["values"])->flatten()->toArray();
+            return implode("_", $this->processEnums($values));
         }
 
         if (is_array((new Arr)->get($where, "value"))) {
-            return implode("_", collect($where["value"])->flatten()->toArray());
+            $values = collect($where["value"])->flatten()->toArray();
+            return implode("_", $this->processEnums($values));
         }
 
-        return (new Arr)->get($where, "value", "");
+        $value = (new Arr)->get($where, "value", "");
+
+        return $this->processEnum($value);
     }
 
     protected function getValuesFromBindings(array $where, string $values) : string
@@ -369,5 +391,21 @@ class CacheKey
         }
 
         return $result;
+    }
+
+    private function processEnum(\BackedEnum|\UnitEnum|string $value): string
+    {
+        if ($value instanceof \BackedEnum) {
+            return $value->value;
+        } elseif ($value instanceof \UnitEnum) {
+            return $value->name;
+        }
+
+        return $value;
+    }
+
+    private function processEnums(array $values): array
+    {
+        return array_map(fn($value) => $this->processEnum($value), $values);
     }
 }
