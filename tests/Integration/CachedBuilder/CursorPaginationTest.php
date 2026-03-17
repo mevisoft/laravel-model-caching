@@ -58,10 +58,13 @@ class CursorPaginationTest extends IntegrationTestCase
             ->whereRowValues(['id', 'name'], '>', [2, 'b'])
             ->orderBy('id');
 
-        $cacheKey1 = (new \ReflectionMethod($query1, 'makeCacheKey'))
-            ->invoke($query1);
-        $cacheKey2 = (new \ReflectionMethod($query2, 'makeCacheKey'))
-            ->invoke($query2);
+        $method = new \ReflectionMethod($query1, 'makeCacheKey');
+        $method->setAccessible(true);
+        $cacheKey1 = $method->invoke($query1);
+
+        $method = new \ReflectionMethod($query2, 'makeCacheKey');
+        $method->setAccessible(true);
+        $cacheKey2 = $method->invoke($query2);
 
         $this->assertNotEquals($cacheKey1, $cacheKey2);
     }
